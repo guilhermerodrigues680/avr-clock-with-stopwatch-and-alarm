@@ -205,21 +205,26 @@ int main(void)
             break;
         
         case TELA_CRONOMETRO:
-            if (Cronometro.ativo) {
-                putmessage(0, 0, "Cronometro: Cont");
-            } else {
-                putmessage(0, 0, "Cronometro: Paus");
-            }
-                putmessage(1, 0,"  :  :  ");
-                putnumber_i(1, 0, Cronometro.hora, 2);
-                putnumber_i(1, 3, Cronometro.minuto, 2);
-                putnumber_i(1, 6, Cronometro.segundo, 2);
+            if (Relogio.segundoAnt != Relogio.segundo)
+            {
+                Relogio.segundoAnt = Relogio.segundo;
+                if (Cronometro.ativo) {
+                    putmessage(0, 0, "Cronometro: Cont");
+                } else {
+                    putmessage(0, 0, "Cronometro: Paus");
+                }
+                    putmessage(1, 0,"  :  :  ");
+                    putnumber_i(1, 0, Cronometro.hora, 2);
+                    putnumber_i(1, 3, Cronometro.minuto, 2);
+                    putnumber_i(1, 6, Cronometro.segundo, 2);
+                }
             break;
         
         case TELA_AJUSTE_ALARME:
             putmessage(0,0, "Ajuste Alarme:  ");
             putnumber_i(1, 0, Alarme.hora,2);
             putnumber_i(1, 3, Alarme.minuto,2);
+            putmessage(1, 5, "   ");
             acertaAlarme();
             break;
         
