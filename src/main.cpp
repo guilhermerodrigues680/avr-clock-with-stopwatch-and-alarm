@@ -27,7 +27,7 @@
 
 
 /** Definicoes de Macro Funcoes */
-// #define _ltrans(x,xi,xm,yi,ym)  (long)((long)(x-xi)*(long)(ym-yi))/(long)(xm-xi)+yi
+#define _ltrans(x,xi,xm,yi,ym)  (long)((long)(x-xi)*(long)(ym-yi))/(long)(xm-xi)+yi
 #define ACIONAR_BUZZER()    PORTD |= _BV(BUZZER);
 #define DESLIGAR_BUZZER()   PORTD &= ~(_BV(PD4));
 
@@ -42,26 +42,31 @@ typedef struct{
 typedef struct{
 	char hora;
    	char minuto;
-   	char segundo;
 } Alar;
 typedef struct{
 	char hora;
    	char minuto;
    	char segundo;
-    char segundoAnt;
     char ativo;
 } Cron;
 
 
 /** Variaveis globais */
 LiquidCrystal lcd(8,9,10,11,12,13);
-Rel *pts;
-Alar *pta;
-Cron *ptc;
-unsigned char *ptela;
+Rel *pts;                               // Ponteiro para o Relogio
+Alar *pta;                              // Ponteiro para o Alarme
+Cron *ptc;                              // Ponteiro para o Cronometro
+unsigned char *ptela;                   // Ponteiro para a tela atual
+unsigned char selecionaRel = FALSE;     // Variavel para auxiliar no ajuste do relogio
+unsigned char selecionaAlar = FALSE;    // Variavel para auxiliar no ajuste do alarme
+unsigned char acertoRel = FALSE;        // Variavel que informa se o relogio esta em modo de acerto
+unsigned char alarmOn = FALSE;          // Variavel que informa se o alarme deve estar ligado
 
 
 /** Prototipos */
+void checarAlarme(void);
+void acertaAlarme(void);
+void acertaRelogio(void);
 unsigned int Le_AD(char channel);
 /*******    PARA USO DO DISPLAY    ***********************/
 void init_dsp(int l,int c);
@@ -71,62 +76,25 @@ void putnumber_f(int l,int c,float ni,int nd);
 
 
 /** Interupções */
-ISR(INT0_vect) // Botao para colocar o relogio em modo acerto e configurar
-{
-    switch (*ptela)
-    {
-    case TELA_CRONOMETRO:
-        ptc->ativo = !ptc->ativo; // Inicia e pausa contagem
-        break;
-    
-    default:
-        break;
-    }
-}
-
-
-ISR(INT1_vect) // Botao Mudar Tela
-{
-    switch (*ptela)
-    {
-    case TELA_CRONOMETRO:
-        if (ptc->hora > 0 || ptc->minuto > 0 || ptc->segundo > 0)
-        {
-            ptc->ativo = FALSE;
-            ptc->hora = 0;
-            ptc->minuto = 0;
-            ptc->segundo = 0;
-            ptc->segundoAnt = 0;
-            break;
-        }
-    default:
-        *ptela = *ptela + 1;
-        if (*ptela > TELA_AJUSTE_RELOGIO)
-        {
-            *ptela = TELA_RELOGIO;
-        }
-        break;
-    }
-    
-}
-
-
-ISR(TIMER1_COMPA_vect)
+ISR(TIMER1_COMPA_vect) // Interupcao gerada a cada segundo pelo TIMER1
 {
     // Incremento do Relogio
-    if (++pts->segundo==60)
+    if (!acertoRel)
     {
-        pts->segundo = 0;
-        if (++pts->minuto == 60)
+        if (++pts->segundo==60)
         {
-            pts->minuto=0;
-            if (++pts->hora == 24)
+            pts->segundo = 0;
+            if (++pts->minuto == 60)
             {
-                pts->hora = 0;
+                pts->minuto=0;
+                if (++pts->hora == 24)
+                {
+                    pts->hora = 0;
+                }
             }
         }
     }
-
+    
     // Incremento do cronometro
     if (*ptela == TELA_CRONOMETRO && ptc->ativo == TRUE)
     {
@@ -143,6 +111,54 @@ ISR(TIMER1_COMPA_vect)
             }
         }
     }
+
+    // Alarme por 4s
+    if(pts->hora == pta->hora && pts->minuto == pta->minuto && pts->segundo < 4) {
+        alarmOn = TRUE;
+    } else {
+        alarmOn = FALSE;
+    }
+}
+
+ISR(INT0_vect) // Botao para ajustar relogio, pausar cronometro, selectionar alarme/relogio
+{
+    switch (*ptela)
+    {
+    case TELA_RELOGIO:
+        acertoRel = TRUE;
+        *ptela = TELA_AJUSTE_RELOGIO;
+        break;
+    case TELA_CRONOMETRO:
+        ptc->ativo = !ptc->ativo; // Inicia e pausa contagem
+        break;
+    case TELA_AJUSTE_ALARME:
+        selecionaAlar = TRUE;
+        break;
+    case TELA_AJUSTE_RELOGIO:
+        selecionaRel = TRUE;
+        break;
+    }
+}
+
+ISR(INT1_vect) // Botao para mudar tela ou zerar cronometro
+{
+    switch (*ptela)
+    {
+    case TELA_RELOGIO: // Muda de tela
+        *ptela = *ptela + 1;
+        break;
+    case TELA_CRONOMETRO: // Zera o cronometro ou passa para o default
+        if (ptc->hora > 0 || ptc->minuto > 0 || ptc->segundo > 0) {
+            ptc->ativo = FALSE;
+            ptc->hora = 0;
+            ptc->minuto = 0;
+            ptc->segundo = 0;
+        } else {
+            *ptela = *ptela + 1;
+        }
+        break;
+    }
+    
 }
 
 
@@ -151,77 +167,137 @@ int main(void)
 {
   	unsigned char tela = 0;
     Rel Relogio = {12, 30, 10};
-    Alar Alarme = {12, 31, 15};
-    Cron Cronometro = {0, 0, 0, 0, FALSE};
+    Alar Alarme = {12, 30};
+    Cron Cronometro = {0, 0, 0, FALSE};
+    
     ptela = &tela;
     pts = &Relogio;
     pta = &Alarme;
     ptc = &Cronometro;
-
   
-    cli(); // CLear Interrupt (desliga as interupcoes do ATmega328)
+    cli();                                                      // CLear Interrupt (desliga as interupcoes do ATmega328)
     init_dsp(2,16);
-
-    // Configuracao de portas
-    DDRD = _BV(BUZZER); // Porta do Buzzer como saida
-
-  	OCR1A = 15625 - 1; // Modulo do TIMER1
-    
-    EIMSK = _BV(INT1) | _BV(INT0); // Habilita interupcao externa INT0 e INT1
-    EICRA = _BV(ISC11) | _BV(ISC10) | _BV(ISC01) | _BV(ISC00); // Ambas interupcoes na borda de subida
-    
+                                                                // Configuracao de portas
+    DDRD = _BV(BUZZER);                                         // Porta do Buzzer como saida
+  	OCR1A = 15625 - 1;                                          // Modulo do TIMER1
+    EIMSK = _BV(INT1) | _BV(INT0);                              // Habilita interupcao externa INT0 e INT1
+    EICRA = _BV(ISC11) | _BV(ISC10) | _BV(ISC01) | _BV(ISC00);  // Ambas interupcoes na borda de subida
     TCCR1A = 0x00;
-    TCCR1B = _BV(WGM12) | _BV(CS12) | _BV(CS10); // Modo CTC e Preescaler de 1024
-    TIMSK1 = _BV(OCIE1A); // Habilita a inturpcao por comparacao com OCR1A no TIMER1
-    sei(); // SEt Interrupt (Liga as interupcoes do ATmega328)
+    TCCR1B = _BV(WGM12) | _BV(CS12) | _BV(CS10);                // Modo CTC e Preescaler de 1024
+    TIMSK1 = _BV(OCIE1A);                                       // Habilita a inturpcao por comparacao com OCR1A no TIMER1
+    sei();                                                      // SEt Interrupt (Liga as interupcoes do ATmega328)
 
     for(;;) 
     {
-        switch (tela)
+        switch (tela)                                           // Executa uma rotina de acordo com a tela atual
         {
         case TELA_RELOGIO:
             if (Relogio.segundoAnt != Relogio.segundo)
             {
                 Relogio.segundoAnt = Relogio.segundo;
-                putmessage(0,0,"   Hora Certa   ");
-                putmessage(1,0,"  :  :  ");
-                putnumber_i(1,0, Relogio.hora, 2);
-                putnumber_i(1,3, Relogio.minuto, 2);
-                putnumber_i(1,6, Relogio.segundo, 2);
-                if (Relogio.hora == Alarme.hora && Relogio.minuto == Alarme.minuto && Relogio.segundo == Alarme.segundo) {
-                    ACIONAR_BUZZER();
-                } else {
-                    DESLIGAR_BUZZER();
-                }
+                putmessage(0, 0, "   Hora Certa   ");
+                putmessage(1, 0, "  :  :  ");
+                putnumber_i(1, 0, Relogio.hora, 2);
+                putnumber_i(1, 3, Relogio.minuto, 2);
+                putnumber_i(1, 6, Relogio.segundo, 2);
+                checarAlarme();
             }
             break;
+        
         case TELA_CRONOMETRO:
-            if (Cronometro.ativo)
-            {
-                if (Cronometro.segundoAnt != Cronometro.segundo)
-                {
-                    Cronometro.segundoAnt = Cronometro.segundo;
-                    putmessage(0,0, "Cronometro: Cont");
-                    putmessage(1,0,"  :  :  ");
-                    putnumber_i(1,0, Cronometro.hora, 2);
-                    putnumber_i(1,3, Cronometro.minuto, 2);
-                    putnumber_i(1,6, Cronometro.segundo, 2);
-                }
+            if (Cronometro.ativo) {
+                putmessage(0, 0, "Cronometro: Cont");
             } else {
-                putmessage(0,0, "Cronometro: Paus");
-                putmessage(1,0,"  :  :  ");
-                putnumber_i(1,0, Cronometro.hora, 2);
-                putnumber_i(1,3, Cronometro.minuto, 2);
-                putnumber_i(1,6, Cronometro.segundo, 2);
+                putmessage(0, 0, "Cronometro: Paus");
             }
+                putmessage(1, 0,"  :  :  ");
+                putnumber_i(1, 0, Cronometro.hora, 2);
+                putnumber_i(1, 3, Cronometro.minuto, 2);
+                putnumber_i(1, 6, Cronometro.segundo, 2);
             break;
+        
         case TELA_AJUSTE_ALARME:
             putmessage(0,0, "Ajuste Alarme:  ");
+            putnumber_i(1, 0, Alarme.hora,2);
+            putnumber_i(1, 3, Alarme.minuto,2);
+            acertaAlarme();
             break;
+        
         case TELA_AJUSTE_RELOGIO:
             putmessage(0,0, "Ajuste Relogio: ");
+            putnumber_i(1, 0, Relogio.hora, 2);
+            putnumber_i(1, 3, Relogio.minuto, 2);
+            putnumber_i(1, 6, Relogio.segundo, 2);
+            acertaRelogio();
             break;
         }
+    }
+}
+
+
+// ==> Checa se o alarme deve ser acionado
+void checarAlarme()
+{
+    if (alarmOn) {
+        ACIONAR_BUZZER();
+    } else {
+        DESLIGAR_BUZZER();
+    }
+}
+
+
+// ==> Acerta as horas e minutos do alarme
+void acertaAlarme()
+{
+    static char state = 0;
+  
+  	if (selecionaAlar) {
+      	selecionaAlar = FALSE;
+      	state++;
+
+      	if(state > 1) {
+            state = 0;
+            *ptela = TELA_RELOGIO;
+        }
+    }
+  	switch(state)
+    {
+      case 0:
+        pta->hora = _ltrans(Le_AD(0), 0, 1023, 0, 23);
+      	break;
+      case 1:
+        pta->minuto = _ltrans(Le_AD(0), 0, 1023, 0, 59);
+        break;
+    }
+}
+
+
+// ==> Acerta o relogio
+void acertaRelogio()
+{
+    static char state = 0;
+  
+  	if (selecionaRel) {
+      	selecionaRel = FALSE;
+      	state++;
+
+      	if(state > 2) {
+            state = 0;
+            acertoRel = FALSE;
+            *ptela = TELA_RELOGIO;
+        }
+    }
+  	switch(state)
+    {
+      case 0:
+        pts->hora = _ltrans(Le_AD(0), 0, 1023, 0, 23);
+        break;
+      case 1:
+        pts->minuto = _ltrans(Le_AD(0), 0, 1023, 0, 59);
+        break;
+      case 2:
+        pts->segundo = _ltrans(Le_AD(0), 0, 1023, 0, 59);
+      	break;
     }
 }
 
