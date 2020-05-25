@@ -61,6 +61,7 @@ Cron *ptc;
 /** Prototipos */
 unsigned int Le_AD(char channel);
 void acertaAlarm(void);
+void acertaRel(void);
 void checarAlarm(void);
 /***    PARA USO DO DISPLAY    **************/
 void init_dsp(int l,int c);
@@ -72,8 +73,8 @@ void putnumber_f(int l,int c,float ni,int nd);
 int main(void)
 {
 
-  Rel Relogio = {12, 30, 58};
-  Alar Alarme = {12, 31};
+  Rel Relogio = {12, 30, 40};
+  Alar Alarme = {12, 30};
   Cron Cronometro = {00, 00, 00};
   r = &Relogio;
   a = &Alarme;
@@ -113,13 +114,17 @@ int main(void)
     case TELA_CONF_ALARM:
       acertaAlarm();
       break;
+
+    case TELA_CONF_REL:
+      acertaRel();
+      break;
     }
 
     _delay_ms(10);  // **Delay somente para melhor simulacao no Tinkercad
   }
 }
 
-// ==> Interrupção pelo PD2
+// ==> Interrupção pelo PORTD2 (INT0)
 ISR(INT0_vect)
 {
   switch (tela)
@@ -132,22 +137,41 @@ ISR(INT0_vect)
   case TELA_CONF_ALARM:
     selecionaAlarm = TRUE;
     break;
+
+  case TELA_CONF_REL:
+    selecionaRel = TRUE;
+    break;
+  }
+}
+
+// ==> Interrupção pelo PORTD3 (INT1)
+ISR(INT1_vect)
+{
+  switch (tela)
+  {
+  case TELA_CONF_ALARM:
+    tela = TELA_CONF_REL;
+    selecionaRel = TRUE;
+    break;
   }
 }
 
 // ==> Interrupção pelo estouro do TIMER1
 ISR(TIMER1_COMPA_vect)
 {
-  // Relogio
-  if (++r->segundo == 60)
+  // Relogio conta somente se nao estiver na tela de AJUSTE
+  if (tela != TELA_CONF_REL)
   {
-    r->segundo = 0;
-    if (++r->minuto == 60)
+    if (++r->segundo == 60)
     {
-      r->minuto = 0;
-      if (++r->hora == 24)
+      r->segundo = 0;
+      if (++r->minuto == 60)
       {
-        r->hora = 0;
+        r->minuto = 0;
+        if (++r->hora == 24)
+        {
+          r->hora = 0;
+        }
       }
     }
   }
@@ -227,7 +251,6 @@ void acertaAlarm(void)
     putnumber_i(1, 7, a->minuto, 2);
     break;
   case 2:
-    // acertoAlarm = FALSE;
     tela = TELA_REL;  // Retorna para tela do Relogio
     break;
   }
@@ -258,6 +281,54 @@ void checarAlarm(void)
   }
 }
 
+// ==> Acertar o relogio
+void acertaRel(void)
+{
+  static char State = -1;
+
+  if (selecionaRel)
+  {
+    selecionaRel = FALSE;
+    State++;
+    State = State > 3 ? 0 : State;
+    lcd.clear();                        // Limpa o que está escrito no display
+    // putmessage(0, 1, "Ajuste Relogio");
+    switch (State)
+    {
+    case 0:
+      putmessage(0, 0, "Conf. Relog HOR");
+      break;
+    case 1:
+      putmessage(0, 0, "Conf. Relog MIN");
+      break;
+    case 2:
+      putmessage(0, 0, "Conf. Relog SEG");
+      break;
+    }
+    putmessage(1, 4, "  :  :  ");
+    putnumber_i(1, 4, r->hora, 2);
+    putnumber_i(1, 7, r->minuto, 2);
+    putnumber_i(1, 10, r->segundo, 2);
+  }
+  switch (State)
+  {
+  case 0:
+    r->hora = _ltrans(Le_AD(0), 0, 1023, 0, 23);
+    putnumber_i(1, 4, r->hora, 2);
+    break;
+  case 1:
+    r->minuto = _ltrans(Le_AD(0), 0, 1023, 0, 59);
+    putnumber_i(1, 7, r->minuto, 2);
+    break;
+  case 2:
+    r->segundo = _ltrans(Le_AD(0), 0, 1023, 0, 59);
+    putnumber_i(1, 10, r->segundo, 2);
+    break;
+  case 3:
+    tela = TELA_REL;  // Retorna para tela do Relogio
+    break;
+  }
+}
 
 /*******    PARA USO DO DISPLAY    ***********************/
 void init_dsp(int l,int c)
