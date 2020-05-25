@@ -14,13 +14,19 @@
 #include <avr/io.h>
 #include <LiquidCrystal.h>
 #include <avr/interrupt.h>
+#include <util/delay.h>
 
 LiquidCrystal lcd(8,9,10,11,12,13);
 
-// #define  TIMER1_MODULE 15625
-// #define  FALSE     0
-// #define  TRUE      1
-// #define _ltrans(x,xi,xm,yi,ym)  (long)((long)(x-xi)*(long)(ym-yi))/(long)(xm-xi)+yi
+#define BUZZER                      PORTD4
+#define FALSE                       0
+#define TRUE                        1
+#define TELA_REL                    0
+#define TELA_CONF_REL               1
+#define TELA_CRONOMETRO             2
+#define TELA_CONF_ALARM             3
+#define DURAC_ALARM_ON              6     /* Em segundos */
+#define _ltrans(x, xi, xm, yi, ym)  (long)((long)(x - xi) * (long)(ym - yi)) / (long)(xm - xi) + yi
 
 
 /** Structs */
@@ -34,7 +40,6 @@ typedef struct{
 typedef struct{
   char hora;
   char minuto;
-  char segundo;
 } Alar;
 
 typedef struct{
@@ -44,84 +49,110 @@ typedef struct{
 } Cron;
 
 /** Variaveis globais */
-Rel *pts;
-Alar *pta;
+char tela = TELA_REL;
+char acertoRel = FALSE;         // Flag acerto relogio
+char selecionaRel = FALSE;      // Flag para auxiliar no acerto relogio
+char selecionaAlarm = FALSE;    // Flag para auxiliar no acerto alarme
+char tocarAlarm = FALSE;        // Flag para indicar se o alarme deve ser tocado
+Rel *r;
+Alar *a;
 Cron *ptc;
 
 /** Prototipos */
-
+unsigned int Le_AD(char channel);
+void acertaAlarm(void);
+void checarAlarm(void);
+/***    PARA USO DO DISPLAY    **************/
+void init_dsp(int l,int c);
+void putmessage(int l,int c,char * msg);
+void putnumber_i(int l,int c,long ni,int nd);
+void putnumber_f(int l,int c,float ni,int nd);
 
 //void setup(void)
 int main(void)
 {
 
-  Rel Relogio = {12, 30, 10};
-  Alar Alarme = {12, 30, 15};
+  Rel Relogio = {12, 30, 58};
+  Alar Alarme = {12, 31};
   Cron Cronometro = {00, 00, 00};
-  pts = &Relogio;
-  pta = &Alarme;
+  r = &Relogio;
+  a = &Alarme;
   ptc = &Cronometro;
 
   cli();
   init_dsp(2, 16);
-  putmessage(0, 3, "Hora Certa");
-  putmessage(1, 0, "  :  :  ");
+
+  DDRD |= _BV(BUZZER);                                        // Pino do buzzer como saida digital
 
   OCR1A = 15625 - 1;
-  // EIMSK = 0x01;
-  // EICRA = _BV(ISC01) | _BV(ISC00);
+  EIMSK = _BV(INT1) | _BV(INT0);                              // Habilita interupcao externa INT0 e INT1
+  EICRA = _BV(ISC11) | _BV(ISC10) | _BV(ISC01) | _BV(ISC00);  // Ambas interrupções na borda de subida
   TCCR1A = 0x00;
-  TCCR1B = _BV(WGM12) | _BV(CS12) | _BV(CS10); // CS -> Preescaler de 1024
+  TCCR1B = _BV(WGM12) | _BV(CS12) | _BV(CS10);                // WGM12 -> CTC, CS -> Preescaler de 1024
   TIMSK1 = _BV(OCIE1A);
   sei();
 
   for (;;)
   {
-    if (Relogio.segundoAnt != Relogio.segundo)
+    switch (tela)
     {
-      Relogio.segundoAnt = Relogio.segundo;
-      putnumber_i(1, 0, Relogio.hora, 2);
-      putnumber_i(1, 3, Relogio.minuto, 2);
-      putnumber_i(1, 6, Relogio.segundo, 2);
+    case TELA_REL:
+      if (Relogio.segundoAnt != Relogio.segundo)
+      {
+        Relogio.segundoAnt = Relogio.segundo;
+        lcd.clear();
+        putmessage(0, 3, "Hora Certa");
+        putmessage(1, 4, "  :  :  ");
+        putnumber_i(1, 4, Relogio.hora, 2);
+        putnumber_i(1, 7, Relogio.minuto, 2);
+        putnumber_i(1, 10, Relogio.segundo, 2);
+      }
+      checarAlarm();
+      break;
+
+    case TELA_CONF_ALARM:
+      acertaAlarm();
+      break;
     }
 
-    if (Relogio.hora == Alarme.hora && Relogio.minuto == Alarme.minuto && Relogio.segundo == Alarme.segundo)
-    {
-      DDRD |= _BV(PD4);
-      PORTD |= _BV(PD4);
-    }
-    else
-    {
-      DDRD |= _BV(PD4);
-      PORTD &= ~(_BV(PD4));
-    }
+    _delay_ms(10);  // **Delay somente para melhor simulacao no Tinkercad
   }
 }
 
-// ISR(INT0_vect) // Pára o relógio e acerta
-// {
-//     Acerto = TRUE;
-//     Seleciona = TRUE;
-// }
+// ==> Interrupção pelo PD2
+ISR(INT0_vect)
+{
+  switch (tela)
+  {
+  case TELA_REL:
+    tela = TELA_CONF_ALARM;
+    selecionaAlarm = TRUE;
+    break;
 
+  case TELA_CONF_ALARM:
+    selecionaAlarm = TRUE;
+    break;
+  }
+}
+
+// ==> Interrupção pelo estouro do TIMER1
 ISR(TIMER1_COMPA_vect)
 {
-  // Relogio.segundo++;
-  // pts->segundo++;
-
-  if (++pts->segundo == 60)
+  // Relogio
+  if (++r->segundo == 60)
   {
-    pts->segundo = 0;
-    if (++pts->minuto == 60)
+    r->segundo = 0;
+    if (++r->minuto == 60)
     {
-      pts->minuto = 0;
-      if (++pts->hora == 24)
+      r->minuto = 0;
+      if (++r->hora == 24)
       {
-        pts->hora = 0;
+        r->hora = 0;
       }
     }
   }
 
+  // Cronometro
   if (++ptc->segundo == 60)
   {
     ptc->segundo = 0;
@@ -135,22 +166,98 @@ ISR(TIMER1_COMPA_vect)
     }
   }
 
-  // Relogio.segundo++;
-  // if (Relogio.segundo==60)
-  // {
-  //     Relogio.segundo = 0;
-  //     Relogio.minuto++;
-  //     if (Relogio.minuto == 60)
-  //     {
-  //         Relogio.minuto=0;
-  //         Relogio.hora++;
-  //         if (Relogio.hora == 24)
-  //         {
-  //             Relogio.hora = 0;
-  //         }
-  //     }
-  // }
+  // Alarme
+  if (r->hora == a->hora && r->minuto == a->minuto && r->segundo < DURAC_ALARM_ON)
+  {
+    tocarAlarm = TRUE;
+  }
+  else
+  {
+    tocarAlarm = FALSE;
+  }
+  
 }
+
+// ==> Leitura Analogica para digital de um canal
+unsigned int Le_AD(char channel)
+{
+	static char FirstTime=1;
+
+	if (FirstTime)
+    {
+    	FirstTime = 0;
+        ADMUX = _BV(REFS0);// Seleciona Vref igual a 5V
+        ADCSRA = _BV(ADEN) | _BV(ADPS2) | _BV(ADPS1) | _BV(ADPS0); // AD e preesc. de 128
+    }
+    DIDR0 = _BV(channel);// Liga a entrada analogica no pino PC0 e desliga a funcao digital
+    ADMUX &= 0xF0;
+    ADMUX |= channel;
+    ADCSRA |= _BV(ADSC);// dispara ao conversor
+    
+  	while (!(ADCSRA & _BV(ADIF)))// espera finalizar a conversao
+       continue;
+    return (ADC); //devolve o resultado da conversao
+}
+
+// ==> Acerta o alarm
+void acertaAlarm(void)
+{
+  static char State = -1;
+
+  if (selecionaAlarm)
+  {
+    selecionaAlarm = FALSE;
+    State++;
+    State = State > 2 ? 0 : State;
+    lcd.clear();                        // Limpa o que está escrito no display
+    // putmessage(0, 1, "Ajuste Alarme");
+    State == 0 ? putmessage(0, 0, "Conf. Alarme HOR") : putmessage(0, 0, "Conf. Alarme MIN");
+    putmessage(1, 4, "  :  ");
+    putnumber_i(1, 4, a->hora, 2);
+    putnumber_i(1, 7, a->minuto, 2);
+  }
+  switch (State)
+  {
+  case 0:
+    a->hora = _ltrans(Le_AD(0), 0, 1023, 0, 23);
+    putnumber_i(1, 4, a->hora, 2);
+    break;
+  case 1:
+    a->minuto = _ltrans(Le_AD(0), 0, 1023, 0, 59);
+    putnumber_i(1, 7, a->minuto, 2);
+    break;
+  case 2:
+    // acertoAlarm = FALSE;
+    tela = TELA_REL;  // Retorna para tela do Relogio
+    break;
+  }
+}
+
+// ==> Checa se o alarme deve ser tocado
+void checarAlarm(void)
+{
+  unsigned char i;
+  if (tocarAlarm)
+  {
+    // Gera uma onda de 833Hz para produzir som no Buzzer (BIP BIP .... BIP BIP .... BIP BIP)
+    for (i = 1; i < 200; i++)
+    {
+      PORTD |= _BV(BUZZER);
+      _delay_us(600);
+      PORTD &= ~(_BV(BUZZER));
+      _delay_us(600);
+
+      if (!(i % 100))   // Se não há resto da divisao por 100
+        _delay_ms(100);
+    }
+    _delay_ms(300);
+  }
+  else
+  {
+    PORTD &= ~(_BV(BUZZER));
+  }
+}
+
 
 /*******    PARA USO DO DISPLAY    ***********************/
 void init_dsp(int l,int c)
