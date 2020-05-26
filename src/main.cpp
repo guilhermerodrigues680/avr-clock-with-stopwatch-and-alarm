@@ -37,6 +37,7 @@ typedef struct{
   char segundoAnt;
 } Rel;
 
+
 typedef struct{
   char hora;
   char minuto;
@@ -54,6 +55,7 @@ char acertoRel = FALSE;         // Flag acerto relogio
 char selecionaRel = FALSE;      // Flag para auxiliar no acerto relogio
 char selecionaAlarm = FALSE;    // Flag para auxiliar no acerto alarme
 char tocarAlarm = FALSE;        // Flag para indicar se o alarme deve ser tocado
+char dispararCron=FALSE;
 Rel *r;
 Alar *a;
 Cron *ptc;
@@ -63,6 +65,7 @@ unsigned int Le_AD(char channel);
 void acertaAlarm(void);
 void acertaRel(void);
 void checarAlarm(void);
+void cronometro(void);
 /***    PARA USO DO DISPLAY    **************/
 void init_dsp(int l,int c);
 void putmessage(int l,int c,char * msg);
@@ -118,6 +121,11 @@ int main(void)
     case TELA_CONF_REL:
       acertaRel();
       break;
+      
+    case TELA_CRONOMETRO:
+      cronometro();
+      break;
+
     }
 
     _delay_ms(10);  // **Delay somente para melhor simulacao no Tinkercad
@@ -141,6 +149,18 @@ ISR(INT0_vect)
   case TELA_CONF_REL:
     selecionaRel = TRUE;
     break;
+  
+  case TELA_CRONOMETRO:
+    dispararCron = FALSE;
+    if (ptc->hora != 0 || ptc->minuto != 0 || ptc->segundo != 0) {
+      ptc->hora = 0;
+      ptc->minuto = 0;
+      ptc->segundo = 0;
+    } 
+    else{
+      tela = TELA_REL;
+    }
+    break;
   }
 }
 
@@ -152,6 +172,17 @@ ISR(INT1_vect)
   case TELA_CONF_ALARM:
     tela = TELA_CONF_REL;
     selecionaRel = TRUE;
+    break;
+
+  case TELA_REL:
+    tela=TELA_CRONOMETRO;
+    break;
+
+  case TELA_CRONOMETRO:
+    if (dispararCron == TRUE)
+      dispararCron = FALSE;
+    else
+      dispararCron = TRUE;
     break;
   }
 }
@@ -175,20 +206,25 @@ ISR(TIMER1_COMPA_vect)
       }
     }
   }
+  
 
   // Cronometro
-  if (++ptc->segundo == 60)
+  if (tela == TELA_CRONOMETRO && dispararCron == TRUE)
   {
-    ptc->segundo = 0;
-    if (++ptc->minuto == 60)
+    if (++ptc->segundo == 60)
     {
-      ptc->minuto = 0;
-      if (++ptc->hora == 24)
+      ptc->segundo = 0;
+      if (++ptc->minuto == 60)
       {
-        ptc->hora = 0;
+        ptc->minuto = 0;
+        if (++ptc->hora == 24)
+        {
+          ptc->hora = 0;
+        }
       }
     }
   }
+
 
   // Alarme
   if (r->hora == a->hora && r->minuto == a->minuto && r->segundo < DURAC_ALARM_ON)
@@ -329,6 +365,24 @@ void acertaRel(void)
     break;
   }
 }
+
+void cronometro(void)
+{
+  lcd.clear();
+
+  if (dispararCron==TRUE)
+    putmessage(0, 0, "Cronometro Conta");
+  else
+   putmessage(0, 0, "Cronometro Pausa");
+  
+  putmessage(1, 4, "  :  :  ");
+  putnumber_i(1, 4, ptc->hora, 2);
+  putnumber_i(1, 7, ptc->minuto, 2);
+  putnumber_i(1, 10, ptc->segundo, 2);
+  _delay_ms(100); // ** Delay somente para melhorar a simulacao no Tinkercad
+
+}
+
 
 /*******    PARA USO DO DISPLAY    ***********************/
 void init_dsp(int l,int c)
